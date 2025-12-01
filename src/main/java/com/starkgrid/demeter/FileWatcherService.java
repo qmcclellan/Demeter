@@ -9,7 +9,7 @@ public class FileWatcherService {
 
     public enum Directories {
         FOLDER1("/workspace/Angular"),
-        FOLDER2("/workspace/Java/SpringBoot");
+        FOLDER2("~/workspace/Java");
 
         private final String path;
 
