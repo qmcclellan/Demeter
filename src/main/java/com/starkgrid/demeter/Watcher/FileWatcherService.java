@@ -1,60 +1,65 @@
 package com.starkgrid.demeter.Watcher;
 
 import java.io.IOException;
-import java.nio.file.*;
-import org.springframework.stereotype.Component;
+import java.nio.file.FileSystems;
+import java.nio.file.Path;
+import java.nio.file.StandardWatchEventKinds;
+import java.nio.file.WatchEvent;
+import java.nio.file.WatchKey;
+import java.nio.file.WatchService;
+import java.util.concurrent.ExecutorService;
 
-@Component
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+
+@Service
 public class FileWatcherService {
 
-    public enum Directories {
-        FOLDER1("/workspace/Angular"),
-        FOLDER2("~/workspace/Java");
+    private static final Logger log = LoggerFactory.getLogger(FileWatcherService.class);
 
-        private final String path;
+    private final ExecutorService virtualExecutor;
+    private final WatchEventHandler handler;
 
-        Directories(String path) {
-            this.path = path;
-        }
-
-        public String getPath() {
-            return path;
-        }
+    public FileWatcherService(ExecutorService virtualExecutor,
+                              WatchEventHandler handler) {
+        this.virtualExecutor = virtualExecutor;
+        this.handler = handler;
     }
 
-    private final WatchService watchService;
-
-    public FileWatcherService() throws IOException {
-        this.watchService = FileSystems.getDefault().newWatchService();
+    public void startWatching(Path rootPath) {
+        virtualExecutor.submit(() -> runWatcherLoop(rootPath));
     }
 
-    public void registerPath(Path path) throws IOException {
-        path.register(
-            watchService,
-            StandardWatchEventKinds.ENTRY_CREATE,
-            StandardWatchEventKinds.ENTRY_MODIFY,
-            StandardWatchEventKinds.ENTRY_DELETE
-        );
-    }
+    private void runWatcherLoop(Path rootPath) {
+        log.info("📂 Starting file watcher at: {}", rootPath);
 
-    public void startWatching() throws IOException, InterruptedException {
-        for (Directories d : Directories.values()) {
-            registerPath(Paths.get(d.getPath()));
-        }
+        try (WatchService watchService = FileSystems.getDefault().newWatchService()) {
 
-        watcherLoop();
-    }
+            rootPath.register(
+                    watchService,
+                    StandardWatchEventKinds.ENTRY_CREATE,
+                    StandardWatchEventKinds.ENTRY_MODIFY
+            );
 
-    public void watcherLoop() throws InterruptedException {
-        while (true) {
-            WatchKey key = watchService.take();
+            while (true) {
+                WatchKey key = watchService.take(); // blocking (perfect for virtual threads)
 
-            for (WatchEvent<?> event : key.pollEvents()) {
-                Path changed = (Path) event.context();
-                System.out.println("EVENT: " + event.kind() + " on " + changed);
+                for (WatchEvent<?> event : key.pollEvents()) {
+                    Path changed = rootPath.resolve((Path) event.context());
+                    handler.handleEvent(changed, event.kind());
+                }
+
+                boolean valid = key.reset();
+                if (!valid) {
+                    log.warn("Watch key is no longer valid. Exiting watcher.");
+                    break;
+                }
             }
 
-            key.reset();
+        } catch (IOException | InterruptedException e) {
+            log.error("Watcher loop error: ", e);
+            Thread.currentThread().interrupt();
         }
     }
 }
