@@ -1,4 +1,4 @@
-package com.starkgrid.demeter;
+package com.starkgrid.demeter.Watcher;
 
 import java.io.IOException;
 import java.nio.file.*;
